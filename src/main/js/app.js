@@ -15,7 +15,8 @@ class App extends React.Component {
 
     constructor(props) {
         super(props);
-        this.state = {employees: [], attributes: [], pageSize: 2, links: {}};
+        this.state = {employees: [], attributes: [], page: 1, pageSize: 2, links: {}
+            , loggedInManager: this.props.loggedInManager};
         this.updatePageSize = this.updatePageSize.bind(this);
         this.onCreate = this.onCreate.bind(this);
         this.onUpdate = this.onUpdate.bind(this);
@@ -33,6 +34,21 @@ class App extends React.Component {
                 path: employeeCollection.entity._links.profile.href,
                 headers: {'Accept': 'application/schema+json'}
             }).then(schema => {
+
+                /**
+                 * “经理”字段不是您希望人们直接编辑的内容。因为它是内联的，所以它应该被视为只读属性。
+                 * 从CreateDialog和UpdateDialog中获取JSONSchema元数据后，只需删除这些条目.
+                 */
+                Object.keys(schema.entity.properties).forEach(function (property) {
+                    if (schema.entity.properties[property].hasOwnProperty('format') &&
+                        schema.entity.properties[property].format === 'uri') {
+                        delete schema.entity.properties[property];
+                    }
+                    else if (schema.entity.properties[property].hasOwnProperty('$ref')) {
+                        delete schema.entity.properties[property];
+                    }
+                });
+
                 this.schema = schema.entity;
                 this.links = employeeCollection.entity._links;
                 return employeeCollection;
@@ -75,21 +91,54 @@ class App extends React.Component {
 
     // tag::update[]
     onUpdate(employee, updatedEmployee) {
-        client({
-            method: 'PUT',
-            path: employee.entity._links.self.href,
-            entity: updatedEmployee,
-            headers: {
-                'Content-Type': 'application/json',
-                'If-Match': employee.headers.Etag
-            }
-        });
+        if(employee.entity.manager.name == this.state.loggedInManager) {
+            updatedEmployee["manager"] = employee.entity.manager;
+            client({
+                method: 'PUT',
+                path: employee.entity._links.self.href,
+                entity: updatedEmployee,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'If-Match': employee.headers.Etag
+                }
+            }).done(response => {
+                /* Let the websocket handler update the state */
+            }, response => {
+                if (response.status.code === 403) {
+                    alert('ACCESS DENIED: You are not authorized to update ' +
+                        employee.entity._links.self.href);
+                }
+                if (response.status.code === 412) {
+                    alert('DENIED: Unable to update ' + employee.entity._links.self.href +
+                        '. Your copy is stale.');
+                }
+            });
+        } else {
+            alert("You are not authorized to update");
+        }
     }
     // end::update[]
 
     // tag::delete[]
     onDelete(employee) {
-        client({method: 'DELETE', path: employee.entity._links.self.href});
+        if(employee.entity.manager.name == this.state.loggedInManager) {
+
+            client({method: 'DELETE', path: employee.entity._links.self.href})
+            .done(response => {
+                /* Let the websocket handler update the state */
+            }, response => {
+                if (response.status.code === 403) {
+                    alert('ACCESS DENIED: You are not authorized to update ' +
+                        employee.entity._links.self.href);
+                }
+                if (response.status.code === 412) {
+                    alert('DENIED: Unable to update ' + employee.entity._links.self.href +
+                        '. Your copy is stale.');
+                }
+            });
+        } else {
+            alert("You are not authorized to update");
+        }
     }
     // end::delete[]
 
@@ -374,6 +423,7 @@ class EmployeeList extends React.Component {
                         <th>First Name</th>
                         <th>Last Name</th>
                         <th>Description</th>
+                        <th>Manager</th>
                         <th></th>
                         <th></th>
                     </tr>
@@ -407,6 +457,7 @@ class Employee extends React.Component {
                 <td>{this.props.employee.entity.firstName}</td>
                 <td>{this.props.employee.entity.lastName}</td>
                 <td>{this.props.employee.entity.description}</td>
+                <td>{this.props.employee.entity.manager.name}</td>
                 <td>
                     <UpdateDialog employee={this.props.employee}
                                   attributes={this.props.attributes}
@@ -422,6 +473,6 @@ class Employee extends React.Component {
 // end::employee[]
 
 ReactDOM.render(
-    <App />,
+    <App loggedInManager={document.getElementById('managername').innerHTML}/>,
     document.getElementById('react')
 )

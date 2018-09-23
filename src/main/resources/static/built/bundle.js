@@ -119,7 +119,8 @@
 	            });
 	        };
 	
-	        _this.state = { employees: [], attributes: [], pageSize: 2, links: {} };
+	        _this.state = { employees: [], attributes: [], page: 1, pageSize: 2, links: {},
+	            loggedInManager: _this.props.loggedInManager };
 	        _this.updatePageSize = _this.updatePageSize.bind(_this);
 	        _this.onCreate = _this.onCreate.bind(_this);
 	        _this.onUpdate = _this.onUpdate.bind(_this);
@@ -142,6 +143,19 @@
 	                    path: employeeCollection.entity._links.profile.href,
 	                    headers: { 'Accept': 'application/schema+json' }
 	                }).then(function (schema) {
+	
+	                    /**
+	                     * “经理”字段不是您希望人们直接编辑的内容。因为它是内联的，所以它应该被视为只读属性。
+	                     * 从CreateDialog和UpdateDialog中获取JSONSchema元数据后，只需删除这些条目.
+	                     */
+	                    Object.keys(schema.entity.properties).forEach(function (property) {
+	                        if (schema.entity.properties[property].hasOwnProperty('format') && schema.entity.properties[property].format === 'uri') {
+	                            delete schema.entity.properties[property];
+	                        } else if (schema.entity.properties[property].hasOwnProperty('$ref')) {
+	                            delete schema.entity.properties[property];
+	                        }
+	                    });
+	
 	                    _this2.schema = schema.entity;
 	                    _this2.links = employeeCollection.entity._links;
 	                    return employeeCollection;
@@ -190,15 +204,29 @@
 	    }, {
 	        key: 'onUpdate',
 	        value: function onUpdate(employee, updatedEmployee) {
-	            client({
-	                method: 'PUT',
-	                path: employee.entity._links.self.href,
-	                entity: updatedEmployee,
-	                headers: {
-	                    'Content-Type': 'application/json',
-	                    'If-Match': employee.headers.Etag
-	                }
-	            });
+	            if (employee.entity.manager.name == this.state.loggedInManager) {
+	                updatedEmployee["manager"] = employee.entity.manager;
+	                client({
+	                    method: 'PUT',
+	                    path: employee.entity._links.self.href,
+	                    entity: updatedEmployee,
+	                    headers: {
+	                        'Content-Type': 'application/json',
+	                        'If-Match': employee.headers.Etag
+	                    }
+	                }).done(function (response) {
+	                    /* Let the websocket handler update the state */
+	                }, function (response) {
+	                    if (response.status.code === 403) {
+	                        alert('ACCESS DENIED: You are not authorized to update ' + employee.entity._links.self.href);
+	                    }
+	                    if (response.status.code === 412) {
+	                        alert('DENIED: Unable to update ' + employee.entity._links.self.href + '. Your copy is stale.');
+	                    }
+	                });
+	            } else {
+	                alert("You are not authorized to update");
+	            }
 	        }
 	        // end::update[]
 	
@@ -207,7 +235,21 @@
 	    }, {
 	        key: 'onDelete',
 	        value: function onDelete(employee) {
-	            client({ method: 'DELETE', path: employee.entity._links.self.href });
+	            if (employee.entity.manager.name == this.state.loggedInManager) {
+	
+	                client({ method: 'DELETE', path: employee.entity._links.self.href }).done(function (response) {
+	                    /* Let the websocket handler update the state */
+	                }, function (response) {
+	                    if (response.status.code === 403) {
+	                        alert('ACCESS DENIED: You are not authorized to update ' + employee.entity._links.self.href);
+	                    }
+	                    if (response.status.code === 412) {
+	                        alert('DENIED: Unable to update ' + employee.entity._links.self.href + '. Your copy is stale.');
+	                    }
+	                });
+	            } else {
+	                alert("You are not authorized to update");
+	            }
 	        }
 	        // end::delete[]
 	
@@ -597,6 +639,11 @@
 	                                null,
 	                                'Description'
 	                            ),
+	                            React.createElement(
+	                                'th',
+	                                null,
+	                                'Manager'
+	                            ),
 	                            React.createElement('th', null),
 	                            React.createElement('th', null)
 	                        ),
@@ -661,6 +708,11 @@
 	                React.createElement(
 	                    'td',
 	                    null,
+	                    this.props.employee.entity.manager.name
+	                ),
+	                React.createElement(
+	                    'td',
+	                    null,
 	                    React.createElement(UpdateDialog, { employee: this.props.employee,
 	                        attributes: this.props.attributes,
 	                        onUpdate: this.props.onUpdate })
@@ -682,7 +734,7 @@
 	}(React.Component);
 	// end::employee[]
 	
-	ReactDOM.render(React.createElement(App, null), document.getElementById('react'));
+	ReactDOM.render(React.createElement(App, { loggedInManager: document.getElementById('managername').innerHTML }), document.getElementById('react'));
 
 /***/ }),
 /* 1 */
